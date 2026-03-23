@@ -1,0 +1,27 @@
+# Dependency directories
+western_refrigeration_frontend/node_modules/
+western_refrigeration_backend/venv/
+western_refrigeration_backend/__pycache__/
+western_refrigeration_backend/app/__pycache__/
+
+# Build artifacts
+western_refrigeration_frontend/dist/
+
+# Databases and secrets
+western_refrigeration_backend/*.db
+western_refrigeration_backend/*.db-journal
+western_refrigeration_backend/.env
+western_refrigeration_backend/synced_keys.json
+
+# Local/OS files
+.DS_Store
+.vscode/
+
+# Media/Logs
+western_refrigeration_backend/captures/*
+!western_refrigeration_backend/captures/.gitkeep
+western_refrigeration_backend/archives/*
+!western_refrigeration_backend/archives/.gitkeep
+western_refrigeration_backend/uploads/*
+!western_refrigeration_backend/uploads/.gitkeep
+western_refrigeration_frontend/frontend_crash_log.txt
