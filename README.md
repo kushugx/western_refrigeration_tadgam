@@ -59,10 +59,35 @@ western_refirgeration/
 
 ---
 
+---
+
+## 🧠 System Logic & Workflow
+
+The system is designed to streamline the quality assurance process on the manufacturing floor.
+
+### User Workflow
+1. **Master File Creation (Admin)**: An administrator creates a "Master File" for a specific refrigerator model, detailing the sequence of parts to be checked (e.g., Dew Collector, Shelf, Tray), their expected quantities, and uploading reference images.
+2. **Camera Setup (Operator)**: The operator pairs the system with a GoPro camera, establishing a local network connection for live video streaming.
+3. **Inspection Process (Operator)**:
+   - The operator selects a Master File to begin a new inspection.
+   - For each part in the sequence, the operator views the live GoPro feed alongside the ideal reference image.
+   - The operator captures a high-resolution photo.
+4. **Automated Analysis**: The captured photo is instantly sent to the backend. The YOLOv8 model analyzes the image to detect the specific part and count instances.
+5. **Verdict & Override**: The system returns an automated **Pass** or **Fail** (with an annotated image showing bounding boxes). Supervisors can manually **Override** the result if necessary.
+6. **Reporting**: Upon completing all parts for a unit, the system generates a permanent record and a downloadable PDF report.
+
+### Technical Architecture
+- **Frontend (React + Vite)**: A responsive, corporate-styled SPA. It orchestrates the inspection state machine, streams MJPEG video directly from the GoPro server, and handles user authentication and report rendering.
+- **Backend (FastAPI)**: Serves as the core API framework. Manages the SQLite database operations (via SQLAlchemy) for Users, Masters, and Reports. Provides secure JWT authentication.
+- **Machine Learning (Ultralytics YOLOv8)**: Reides in `ml_pipeline.py`. It loads a custom-trained `.pt` model file. Given an image and expected parameters, it performs inference, filters confidence thresholds, draws bounding boxes, and executes business logic (e.g., presence check vs. exact counting).
+- **GoPro Stream Server**: A standalone script that receives the raw UDP video stream from the GoPro, decodes it, and rebroadcasts it as a low-latency HTTP MJPEG stream for the frontend UI.
+
+---
+
 ## 📸 Usage
 
 1. **Dashboard**: View overall inspection statistics and recent activity.
-2. **Start Inspection**: select a Master file, follow the single-pane guide to capture photos of refrigeration parts.
+2. **Start Inspection**: Select a Master file, follow the single-pane guide to capture photos of refrigeration parts.
 3. **ML Verdict**: The system automatically analyzes the capture and provides a Pass/Fail verdict.
 4. **Reports**: Access historical data, download PDF summaries, or perform manual overrides if necessary.
 
