@@ -624,12 +624,12 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
     return {"message": "Report deleted"}
 
 
-@app.get("/maintenance/stats")
+@app.get("/api/maintenance/stats")
 def get_maintenance_stats(db: Session = Depends(get_db)):
     return archive_manager.get_storage_stats(db)
 
 
-@app.post("/maintenance/archive")
+@app.post("/api/maintenance/archive")
 def perform_maintenance_archive(req: ArchiveRequest, db: Session = Depends(get_db)):
     try:
         result = archive_manager.archive_old_data(db, req.days)
@@ -638,7 +638,7 @@ def perform_maintenance_archive(req: ArchiveRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/maintenance/download/{filename}")
+@app.get("/api/maintenance/download/{filename}")
 def download_maintenance_archive(filename: str):
     path = os.path.join(archive_manager.ARCHIVES_DIR, filename)
     if not os.path.exists(path):

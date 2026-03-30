@@ -2,6 +2,7 @@ import os
 import shutil
 import json
 import zipfile
+import base64
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from . import models
@@ -37,10 +38,32 @@ def resolve_local_path(url: str | None) -> str | None:
             
     return None
 
+def get_base64_of_image(file_path: str) -> str | None:
+    try:
+        with open(file_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        print(f"Error base64 encoding {file_path}: {e}")
+        return None
+
+def push_to_customer_db(archive_payload: list, api_key: str):
+    """
+    Stub for pushing the JSON archive to the customer's database.
+    """
+    if not api_key:
+        print("API Key not configured. Skipping push to customer database.")
+        return False
+    # Example logic:
+    # import requests
+    # resp = requests.post("https://customer-database.com/api/archive", json=archive_payload, headers={"Authorization": f"Bearer {api_key}"})
+    # return resp.status_code == 200
+    print("Pretending to push to customer DB...")
+    return True
+
 def archive_old_data(db: Session, days: int) -> dict:
     """
     Identifies reports and images older than `days`.
-    Packs them into a ZIP and deletes them from the system.
+    Packs them into a JSON payload with Base64 images and deletes them from the system.
     """
     threshold = datetime.utcnow() - timedelta(days=days)
     
@@ -50,21 +73,28 @@ def archive_old_data(db: Session, days: int) -> dict:
     if not old_reports:
         return {"success": True, "archived_count": 0, "message": "No data found to archive."}
     
-    # 2. Prepare archiving directory
-    archive_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive_name = f"archive_{archive_id}"
-    temp_dir = os.path.join(ARCHIVES_DIR, archive_name)
-    os.makedirs(temp_dir, exist_ok=True)
-    os.makedirs(os.path.join(temp_dir, "images"), exist_ok=True)
-    
     reports_summary = []
     files_to_delete = set()
     
-    # 3. Process reports
+    # 2. Process reports and convert images to Base64
     for r in old_reports:
         parts = json.loads(r.parts_data)
         
-        # Track for summary JSON
+        for part in parts:
+            for img_key in ["captured_image", "reference_image"]:
+                url = part.get(img_key)
+                local_path = resolve_local_path(url)
+                if local_path and os.path.isfile(local_path):
+                    # Convert to Base64
+                    b64_str = get_base64_of_image(local_path)
+                    if b64_str:
+                        part[f"base64_{img_key}"] = b64_str
+                        
+                    # Mark for deletion ONLY if it's in uploads/ or captures/
+                    if UPLOAD_DIR in local_path or CAPTURES_DIR in local_path:
+                        files_to_delete.add(local_path)
+        
+        # Add to payload
         reports_summary.append({
             "id": r.id,
             "master_name": r.master_name,
@@ -73,32 +103,19 @@ def archive_old_data(db: Session, days: int) -> dict:
             "parts": parts
         })
         
-        # Collect image files
-        for part in parts:
-            for img_key in ["captured_image", "reference_image"]:
-                url = part.get(img_key)
-                local_path = resolve_local_path(url)
-                if local_path and os.path.isfile(local_path):
-                    # Copy to archive temp dir if not already there
-                    dest_path = os.path.join(temp_dir, "images", os.path.basename(local_path))
-                    if not os.path.exists(dest_path):
-                        shutil.copy2(local_path, dest_path)
-                    
-                    # Mark for deletion ONLY if it's in uploads/ or captures/ (not a placeholder/static)
-                    if UPLOAD_DIR in local_path or CAPTURES_DIR in local_path:
-                        files_to_delete.add(local_path)
+    # 3. Simulate Push to Customer Database
+    api_key_placeholder = os.getenv("CUSTOMER_DB_API_KEY", "")
+    push_to_customer_db(reports_summary, api_key_placeholder)
     
-    # 4. Save summary JSON into archive
-    with open(os.path.join(temp_dir, "reports_summary.json"), "w") as f:
+    # 4. Save summary JSON to archives dir
+    archive_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_filename = f"archive_{archive_id}.json"
+    archive_path = os.path.join(ARCHIVES_DIR, archive_filename)
+    
+    with open(archive_path, "w") as f:
         json.dump(reports_summary, f, indent=4)
         
-    # 5. Create ZIP
-    zip_path = shutil.make_archive(temp_dir, 'zip', temp_dir)
-    
-    # 6. Delete temp directory
-    shutil.rmtree(temp_dir)
-    
-    # 7. Cleanup System (DB and Filesystem)
+    # 5. Cleanup System (DB and Filesystem)
     # DELETE Reports from DB
     report_ids = [r.id for r in old_reports]
     db.query(models.Report).filter(models.Report.id.in_(report_ids)).delete(synchronize_session=False)
@@ -118,8 +135,8 @@ def archive_old_data(db: Session, days: int) -> dict:
         "success": True,
         "archived_count": len(old_reports),
         "deleted_files_count": deleted_files_count,
-        "archive_file": os.path.basename(zip_path),
-        "message": f"Successfully archived {len(old_reports)} reports and {deleted_files_count} files."
+        "archive_file": archive_filename,
+        "message": f"Successfully archived {len(old_reports)} reports to Base64 JSON and deleted {deleted_files_count} files."
     }
 
 def get_storage_stats(db: Session):

@@ -24,7 +24,7 @@ export default function InspectionPage() {
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [capturing, setCapturing] = useState(false);
+
   const lastSeenCaptureRef = useRef<string | null>(null);
   const [partCaptures, setPartCaptures] = useState<Record<number, string>>({});
   const [partMlResults, setPartMlResults] = useState<Record<number, { status: string, message?: string, is_overridden?: boolean, original_status?: string, original_message?: string }>>({});
@@ -117,26 +117,45 @@ export default function InspectionPage() {
 
   const currentPart = master.parts[currentIndex];
 
-  const handleCapture = async () => {
+  const handleSkipLastAndGenerate = async () => {
+    const allCaptures = { ...partCaptures };
+    const allMlResults = { ...partMlResults };
+
+    allMlResults[currentIndex] = { status: 'skipped', message: 'Part Skipped' };
+
+    const partsData = master.parts.map((part, idx) => ({
+      part_name: part.part_name,
+      job_type: part.job_type,
+      expected_count: part.expected_count || null,
+      captured_image: allCaptures[idx] || null,
+      reference_image: part.image_url || null,
+      ml_status: allMlResults[idx]?.status || 'idle',
+      ml_message: allMlResults[idx]?.message || 'No ML analysis performed',
+      is_overridden: allMlResults[idx]?.is_overridden || false,
+      original_ml_status: allMlResults[idx]?.original_status,
+      original_ml_message: allMlResults[idx]?.original_message
+    }));
+
+    setGeneratingReport(true);
     try {
-      setCapturing(true);
-      const res = await fetch("http://localhost:8001/capture_photo", {
+      const res = await fetch("/reports", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          master_name: master.name,
+          operator: localStorage.getItem("username") || "unknown",
+          parts: partsData,
+        }),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        showToast(data.detail || "Failed to capture photo", "error");
-        return;
+      if (res.ok) {
+        navigate("/reports");
+      } else {
+        showToast("Failed to generate report", "error");
       }
-
-      const data = await res.json();
-      setCapturedImage(`http://localhost:8001${data.image_url}`);
-    } catch (error) {
-      console.error(error);
-      showToast("Failed to capture photo. Is the GoPro stream server running?", "error");
+    } catch {
+      showToast("Failed to connect to server", "error");
     } finally {
-      setCapturing(false);
+      setGeneratingReport(false);
     }
   };
 
@@ -168,6 +187,11 @@ export default function InspectionPage() {
           original_status: mlResult.originalStatus,
           original_message: mlResult.originalMessage
         }
+      }));
+    } else {
+      setPartMlResults(prev => ({
+        ...prev,
+        [currentIndex]: { status: 'skipped', message: 'Part Skipped' }
       }));
     }
     setCapturedImage(null);
@@ -230,8 +254,12 @@ export default function InspectionPage() {
         e.preventDefault();
         if (capturedImage) {
           if (currentIndex < master.parts.length - 1) handleNext();
-        } else if (!capturing) {
-          handleCapture();
+        } else {
+          if (currentIndex < master.parts.length - 1) {
+            handleNext();
+          } else {
+            handleSkipLastAndGenerate();
+          }
         }
       }
       if (e.key === "Escape" && capturedImage) {
@@ -240,7 +268,7 @@ export default function InspectionPage() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [capturedImage, capturing, currentIndex, master.parts.length]);
+  }, [capturedImage, currentIndex, master.parts.length]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -395,14 +423,24 @@ export default function InspectionPage() {
             )}
           </>
         ) : (
-          <button
-            onClick={handleCapture}
-            disabled={capturing}
-            className="px-8 py-3 bg-western-green text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors font-medium flex items-center space-x-2 shadow-sm"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
-            <span>{capturing ? "Capturing..." : "Capture Photo"}</span>
-          </button>
+          <>
+            {currentIndex < master.parts.length - 1 ? (
+              <button
+                onClick={handleNext}
+                className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm"
+              >
+                Skip Part ⏭
+              </button>
+            ) : (
+              <button
+                onClick={handleSkipLastAndGenerate}
+                disabled={generatingReport}
+                className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm disabled:opacity-50"
+              >
+                {generatingReport ? "Generating..." : "Skip & Finish 🏁"}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

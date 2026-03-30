@@ -4,8 +4,6 @@ export default function CameraSetupPage() {
     const [bleStatus, setBleStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
     const [bleMessage, setBleMessage] = useState("");
     const [wifiConnected, setWifiConnected] = useState(false);
-    const [previewRunning, setPreviewRunning] = useState(false);
-    const [previewLoading, setPreviewLoading] = useState(false);
     const [mediaSyncActive, setMediaSyncActive] = useState(false);
     const [mediaSyncLoading, setMediaSyncLoading] = useState(false);
 
@@ -28,7 +26,6 @@ export default function CameraSetupPage() {
                     } else if (!statusData.ble_connected && bleStatus !== "connecting") {
                         setBleStatus("disconnected");
                     }
-                    setPreviewRunning(statusData.preview_running);
                     setMediaSyncActive(statusData.media_sync_active);
                     setWifiConnected(wifiData.connected);
                 }
@@ -88,26 +85,6 @@ export default function CameraSetupPage() {
         } catch {
             setBleStatus("error");
             setBleMessage("Backend unreachable");
-        }
-    };
-
-    const handlePreviewToggle = async () => {
-        setPreviewLoading(true);
-        try {
-            const endpoint = previewRunning ? "stop-preview" : "start-preview";
-            await fetch(`/gopro/${endpoint}`, { method: "POST" });
-
-            setTimeout(async () => {
-                try {
-                    const res = await fetch("/gopro/status");
-                    const data = await res.json();
-                    setPreviewRunning(data.preview_running);
-                } catch { /* ignore */ }
-                setPreviewLoading(false);
-            }, 3000);
-        } catch {
-            setPreviewLoading(false);
-            alert("Failed to reach backend");
         }
     };
 
@@ -219,53 +196,11 @@ export default function CameraSetupPage() {
                         </div>
                     </div>
 
-                    {/* Step 3: Preview Toggle */}
+                    {/* Step 3: Media Sync */}
                     <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-gray-100 dark:border-neutral-700 p-8 space-y-4">
                         <div className="flex items-center justify-between mb-2">
                             <h2 className="text-xl font-bold text-gray-800 dark:text-white">
-                                Step 3: Preview Server
-                            </h2>
-                            <div className="flex items-center space-x-2">
-                                <span className={`w-3 h-3 rounded-full ${statusColor(previewRunning)}`} />
-                                <span className="text-sm text-gray-500 dark:text-neutral-400">
-                                    {previewRunning ? "Running" : "Stopped"}
-                                </span>
-                            </div>
-                        </div>
-
-                        <p className="text-sm text-gray-500 dark:text-neutral-400">
-                            Start the preview server to stream GoPro video to the inspection page.
-                        </p>
-
-                        <div className="flex items-center justify-between mt-4">
-                            <span className="font-semibold text-gray-700 dark:text-neutral-300">
-                                {previewRunning ? "Preview is ON" : "Preview is OFF"}
-                            </span>
-                            <button
-                                onClick={handlePreviewToggle}
-                                disabled={previewLoading}
-                                className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${previewRunning ? "bg-emerald-600" : "bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-gray-600"
-                                    } ${previewLoading ? "opacity-50" : "cursor-pointer"}`}
-                            >
-                                <span
-                                    className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-transform duration-300 ${previewRunning ? "translate-x-7" : "translate-x-0"
-                                        }`}
-                                />
-                            </button>
-                        </div>
-
-                        {previewRunning && (
-                            <div className="text-xs text-center text-gray-400 dark:text-neutral-500 mt-2">
-                                Stream available at <code className="bg-gray-100 dark:bg-neutral-700 px-1 py-0.5 rounded text-gray-600 dark:text-neutral-300">/stream/video_feed</code>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Step 4: Media Sync */}
-                    <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-gray-100 dark:border-neutral-700 p-8 space-y-4">
-                        <div className="flex items-center justify-between mb-2">
-                            <h2 className="text-xl font-bold text-gray-800 dark:text-white">
-                                Step 4: Media Sync
+                                Step 3: Media Sync
                             </h2>
                             <div className="flex items-center space-x-2">
                                 <span className={`w-3 h-3 rounded-full shadow-sm ${statusColor(mediaSyncActive)}`} />

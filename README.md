@@ -7,7 +7,7 @@ A modern, high-performance quality inspection platform built for **Western Refri
 ## 🚀 Features
 
 - **Automated ML Inspection**: Real-time part detection and counting using YOLOv8.
-- **GoPro Integration**: Custom stream server for high-resolution image capture and synchronization.
+- **GoPro Integration**: Direct camera communication for high-resolution image capture and synchronization.
 - **Global Navigation**: Sleek, retractable sidebar and centralized layout for seamless multi-page workflow.
 - **User-Specific Scoping**: Secure report visibility where operators only see their own inspections while admins maintain global oversight.
 - **Data Management**: Advanced archiving and maintenance tools to manage historical inspection data.
@@ -67,20 +67,19 @@ The system is designed to streamline the quality assurance process on the manufa
 
 ### User Workflow
 1. **Master File Creation (Admin)**: An administrator creates a "Master File" for a specific refrigerator model, detailing the sequence of parts to be checked (e.g., Dew Collector, Shelf, Tray), their expected quantities, and uploading reference images.
-2. **Camera Setup (Operator)**: The operator pairs the system with a GoPro camera, establishing a local network connection for live video streaming.
+2. **Camera Setup (Operator)**: The operator pairs the system with a GoPro camera, establishing a local network connection for photo capture and synchronization.
 3. **Inspection Process (Operator)**:
    - The operator selects a Master File to begin a new inspection.
-   - For each part in the sequence, the operator views the live GoPro feed alongside the ideal reference image.
-   - The operator captures a high-resolution photo.
+   - For each part in the sequence, the operator compares the part with the ideal reference image and captures a high-resolution photo on the GoPro.
 4. **Automated Analysis**: The captured photo is instantly sent to the backend. The YOLOv8 model analyzes the image to detect the specific part and count instances.
 5. **Verdict & Override**: The system returns an automated **Pass** or **Fail** (with an annotated image showing bounding boxes). Supervisors can manually **Override** the result if necessary.
 6. **Reporting**: Upon completing all parts for a unit, the system generates a permanent record and a downloadable PDF report.
 
 ### Technical Architecture
-- **Frontend (React + Vite)**: A responsive, corporate-styled SPA. It orchestrates the inspection state machine, streams MJPEG video directly from the GoPro server, and handles user authentication and report rendering.
+- **Frontend (React + Vite)**: A responsive, corporate-styled SPA. It orchestrates the inspection state machine, pulls synced captures natively from the GoPro, and handles user authentication and report rendering.
 - **Backend (FastAPI)**: Serves as the core API framework. Manages the SQLite database operations (via SQLAlchemy) for Users, Masters, and Reports. Provides secure JWT authentication.
 - **Machine Learning (Ultralytics YOLOv8)**: Reides in `ml_pipeline.py`. It loads a custom-trained `.pt` model file. Given an image and expected parameters, it performs inference, filters confidence thresholds, draws bounding boxes, and executes business logic (e.g., presence check vs. exact counting).
-- **GoPro Stream Server**: A standalone script that receives the raw UDP video stream from the GoPro, decodes it, and rebroadcasts it as a low-latency HTTP MJPEG stream for the frontend UI.
+- **GoPro Media Manager**: A background process that orchestrates BLE connection protocols and subsequent API calls to control camera capture triggers and fetch raw image data to the server.
 
 ---
 

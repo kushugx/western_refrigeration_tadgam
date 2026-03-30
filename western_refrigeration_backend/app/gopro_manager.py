@@ -65,6 +65,93 @@ def wifi_status():
         return {"connected": False}
 
 
+@router.get("/battery")
+def battery_status():
+    """Get the internal battery percentage of the GoPro."""
+    import json
+    try:
+        req = urllib.request.Request(
+            f"http://{GOPRO_IP}:8080/gopro/camera/state",
+            headers={"Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read())
+            status = data.get("status", {})
+            percentage = status.get("70", 0)  # Status 70 is battery percentage
+            return {"connected": True, "percentage": percentage}
+    except Exception:
+        return {"connected": False, "percentage": 0}
+
+
+@router.get("/storage")
+def storage_status():
+    """Get the remaining storage capacity of the GoPro."""
+    import json
+    try:
+        req = urllib.request.Request(
+            f"http://{GOPRO_IP}:8080/gopro/camera/state",
+            headers={"Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            status = data.get("status", {})
+            total_kb = status.get("117", 0)
+            rem_kb = status.get("54", 0)
+            
+            total_bytes = total_kb * 1024
+            rem_bytes = rem_kb * 1024
+            
+            # Prevent negative used space if endpoints behave strangely
+            used_bytes = total_bytes - rem_bytes if total_bytes > rem_bytes else 0
+            
+            return {
+                "connected": True,
+                "total_bytes": total_bytes,
+                "used_bytes": used_bytes,
+                "remaining_bytes": rem_bytes
+            }
+    except Exception:
+        return {
+            "connected": False,
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "remaining_bytes": 0
+        }
+
+
+@router.post("/format-sd")
+def format_sd_card():
+    """Clear all media from the GoPro SD card dynamically."""
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.Request(f"http://{GOPRO_IP}:8080/gopro/media/list", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            
+        media = data.get("media", [])
+        deleted_count = 0
+        for directory in media:
+            d_name = directory.get("d", "")
+            for f in directory.get("fs", []):
+                f_name = f.get("n", "")
+                if d_name and f_name:
+                    try:
+                        del_req = urllib.request.Request(
+                            f"http://{GOPRO_IP}:8080/gopro/media/delete/file?path={d_name}/{f_name}",
+                            headers={"Accept": "application/json"}
+                        )
+                        with urllib.request.urlopen(del_req, timeout=3) as del_resp:
+                            if del_resp.getcode() == 200:
+                                deleted_count += 1
+                    except Exception:
+                        pass # Ignore individual file deletion errors
+        
+        return {"success": True, "message": f"Successfully cleared {deleted_count} files from GoPro."}
+    except Exception as e:
+        return {"success": False, "detail": f"Failed to reach GoPro to clear SD Card: {str(e)}"}
+
+
 @router.get("/ble-logs")
 def ble_logs():
     """Get recent output from the BLE connection script."""

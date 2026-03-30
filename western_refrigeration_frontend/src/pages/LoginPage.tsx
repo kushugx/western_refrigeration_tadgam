@@ -7,8 +7,8 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleLogin = async (e?: React.FormEvent | React.KeyboardEvent) => {
+        if (e && e.preventDefault) e.preventDefault();
         setError("");
         setLoading(true);
 
@@ -75,6 +75,7 @@ export default function LoginPage() {
                                 onChange={e => setUsername(e.target.value)}
                                 placeholder="Enter your username"
                                 required
+                                onKeyDown={(e) => e.key === 'Enter' && handleLogin(e)}
                                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-neutral-500 focus:ring-2 focus:ring-western-green focus:border-transparent outline-none transition-all"
                             />
                         </div>
@@ -89,6 +90,7 @@ export default function LoginPage() {
                                 onChange={e => setPassword(e.target.value)}
                                 placeholder="Enter your password"
                                 required
+                                onKeyDown={(e) => e.key === 'Enter' && handleLogin(e)}
                                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-600 bg-gray-50 dark:bg-neutral-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-neutral-500 focus:ring-2 focus:ring-western-green focus:border-transparent outline-none transition-all"
                             />
                             <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">

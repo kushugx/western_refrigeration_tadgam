@@ -19,28 +19,30 @@ import { showToast } from "./components/Toast";
 function CameraWidget() {
   const [status, setStatus] = useState({
     cameraConnected: false,
-    previewServerRunning: false,
-    mediaSyncActive: false
+    mediaSyncActive: false,
+    batteryPercentage: null as number | null
   });
 
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const [statusRes, wifiRes] = await Promise.all([
-          fetch("/gopro/status"),
-          fetch("/gopro/wifi-status").catch(() => ({ ok: false, json: async () => ({ connected: false }) }))
+        const [statusRes, wifiRes, batteryRes] = await Promise.all([
+          fetch("/gopro/status").catch(() => null),
+          fetch("/gopro/wifi-status").catch(() => null),
+          fetch("/gopro/battery").catch(() => null)
         ]);
 
-        if (!statusRes.ok) throw new Error("Failed to fetch camera status");
+        if (!statusRes?.ok) throw new Error("Failed to fetch camera status");
 
         const data = await statusRes.json();
-        const wifiData = wifiRes.ok ? await wifiRes.json() : { connected: false };
+        const wifiData = wifiRes?.ok ? await wifiRes.json() : { connected: false };
+        const batteryData = batteryRes?.ok ? await batteryRes.json() : { connected: false, percentage: 0 };
 
         // Actual backend fields map exactly to the status state we need
         setStatus({
           cameraConnected: data.ble_connected || wifiData.connected,
-          previewServerRunning: data.preview_running,
-          mediaSyncActive: data.media_sync_active
+          mediaSyncActive: data.media_sync_active,
+          batteryPercentage: batteryData.connected ? batteryData.percentage : null
         });
       } catch (err) {
         console.error("Failed to fetch camera widget status", err);
@@ -55,15 +57,11 @@ function CameraWidget() {
   const handleAction = async (action: string) => {
     try {
       const isCurrentlyActive =
-        action === 'camera' ? status.cameraConnected :
-          action === 'stream' ? status.previewServerRunning :
-            status.mediaSyncActive;
+        action === 'camera' ? status.cameraConnected : status.mediaSyncActive;
 
       const endpoint = action === 'camera'
         ? (isCurrentlyActive ? '/gopro/ble-disconnect' : '/gopro/ble-connect')
-        : action === 'stream'
-          ? (isCurrentlyActive ? '/gopro/stop-preview' : '/gopro/start-preview')
-          : (isCurrentlyActive ? '/gopro/stop-media-sync' : '/gopro/start-media-sync');
+        : (isCurrentlyActive ? '/gopro/stop-media-sync' : '/gopro/start-media-sync');
 
       const verb = isCurrentlyActive ? 'Stopping' : 'Starting';
       showToast(`${verb} ${action}...`, "info");
@@ -82,33 +80,51 @@ function CameraWidget() {
   };
 
   return (
-    <div className="flex gap-4 p-4 mt-6 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-700">
-      <div
-        onClick={() => handleAction('camera')}
-        className="flex flex-col items-center gap-1 cursor-pointer hover:opacity-75 transition-opacity px-2"
-        title="Connect Camera (BLE)"
-      >
-        <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Camera</span>
-        <div className={`w-3 h-3 rounded-full ${status.cameraConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+    <div className="flex flex-col items-center gap-3 mt-6">
+      <div className="flex gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-700">
+        <div
+          onClick={() => handleAction('camera')}
+          className="flex flex-col items-center gap-1 cursor-pointer hover:opacity-75 transition-opacity px-2"
+          title="Connect Camera (BLE)"
+        >
+          <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Camera</span>
+          <div className={`w-3 h-3 rounded-full ${status.cameraConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+        </div>
+        <div className="w-px bg-gray-200 dark:bg-neutral-700" />
+
+        <div
+          onClick={() => handleAction('sync')}
+          className="flex flex-col items-center gap-1 cursor-pointer hover:opacity-75 transition-opacity px-2"
+          title="Start Media Sync"
+        >
+          <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Sync</span>
+          <div className={`w-3 h-3 rounded-full ${status.mediaSyncActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+        </div>
+
+        <div className="w-px bg-gray-200 dark:bg-neutral-700" />
+
+        <div 
+          className="flex flex-col items-center gap-1 px-2 pointer-events-none"
+          title="GoPro Battery"
+        >
+          <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Battery</span>
+          <span className="text-sm font-bold text-gray-800 dark:text-neutral-200 leading-tight">
+            {status.batteryPercentage !== null ? `${status.batteryPercentage}%` : '--'}
+          </span>
+        </div>
       </div>
-      <div className="w-px bg-gray-200 dark:bg-neutral-700" />
-      <div
-        onClick={() => handleAction('stream')}
-        className="flex flex-col items-center gap-1 cursor-pointer hover:opacity-75 transition-opacity px-2"
-        title="Start Preview Stream"
-      >
-        <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Stream</span>
-        <div className={`w-3 h-3 rounded-full ${status.previewServerRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
-      </div>
-      <div className="w-px bg-gray-200 dark:bg-neutral-700" />
-      <div
-        onClick={() => handleAction('sync')}
-        className="flex flex-col items-center gap-1 cursor-pointer hover:opacity-75 transition-opacity px-2"
-        title="Start Media Sync"
-      >
-        <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Sync</span>
-        <div className={`w-3 h-3 rounded-full ${status.mediaSyncActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
-      </div>
+
+      {status.batteryPercentage !== null && status.batteryPercentage < 30 && (
+        <div className={`text-xs font-semibold px-4 py-1.5 rounded-full border shadow-sm ${
+          status.batteryPercentage < 15
+            ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800/50'
+            : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800/50'
+        }`}>
+          {status.batteryPercentage < 15 
+            ? '⚠️ Battery Critically Low. Charge Immediately.'
+            : '⚠️ Battery is low. Use Carefully.'}
+        </div>
+      )}
     </div>
   );
 }
@@ -204,7 +220,7 @@ function Dashboard() {
   }, [role, username]);
 
   // Camera status for the Camera Setup card badge
-  const [cameraStatus, setCameraStatus] = useState({ camera: false, streaming: false });
+  const [cameraStatus, setCameraStatus] = useState({ camera: false });
   useEffect(() => {
     const poll = async () => {
       try {
@@ -215,8 +231,7 @@ function Dashboard() {
         const status = statusRes?.ok ? await statusRes.json() : null;
         const wifi   = wifiRes?.ok  ? await wifiRes.json()   : null;
         setCameraStatus({
-          camera:    !!(wifi?.connected || status?.camera_connected),
-          streaming: !!(status?.streaming_active || status?.preview_active),
+          camera: !!(wifi?.connected || status?.camera_connected),
         });
       } catch { /* ignore */ }
     };
@@ -378,13 +393,11 @@ function Dashboard() {
               {/* Live status badge */}
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
                 ${cameraStatus.camera
-                  ? cameraStatus.streaming
-                    ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
-                    : "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800"
+                  ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
                   : "bg-gray-100 dark:bg-neutral-700 text-gray-500 dark:text-neutral-400 border-gray-200 dark:border-neutral-600"
                 }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${cameraStatus.camera ? cameraStatus.streaming ? "bg-emerald-500 animate-pulse" : "bg-yellow-500" : "bg-gray-400"}`} />
-                {cameraStatus.camera ? cameraStatus.streaming ? "Streaming" : "Connected" : "Offline"}
+                <span className={`w-1.5 h-1.5 rounded-full ${cameraStatus.camera ? "bg-emerald-500" : "bg-gray-400"}`} />
+                {cameraStatus.camera ? "Connected" : "Offline"}
               </div>
             </div>
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-1">Camera & Gallery</h3>
