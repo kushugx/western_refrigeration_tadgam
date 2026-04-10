@@ -4,6 +4,9 @@ import { useNavigate } from "react-router-dom";
 interface Master {
   id: number;
   name: string;
+  model_family: string;
+  sub_model: string;
+  door_count: number;
 }
 
 export default function ManageMastersPage() {
@@ -64,9 +67,21 @@ export default function ManageMastersPage() {
                 key={master.id}
                 className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-gray-100 dark:border-neutral-700 rounded-xl p-5 hover:border-western-green/30 hover:bg-western-green/5 dark:hover:bg-gray-700/50 transition-colors group"
               >
-                <span className="font-semibold text-gray-800 dark:text-white text-lg">
-                  {master.name}
-                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-gray-800 dark:text-white text-lg">
+                      {master.name}
+                    </span>
+                    <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 bg-western-green/10 text-western-green rounded">
+                      {master.model_family}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500 dark:text-neutral-400">
+                    <span>Sub-model: <strong className="text-gray-700 dark:text-neutral-300">{master.sub_model}</strong></span>
+                    <span className="text-gray-300 dark:text-neutral-600">•</span>
+                    <span>{master.door_count} door{master.door_count > 1 ? "s" : ""}</span>
+                  </div>
+                </div>
 
                 <div className="flex items-center gap-3">
                   <button

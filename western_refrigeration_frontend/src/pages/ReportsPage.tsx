@@ -19,7 +19,6 @@ interface ReportDetail {
     parts: {
         part_name: string;
         job_type: string;
-        expected_count?: number | null;
         captured_image?: string | null;
         reference_image?: string | null;
         ml_status: string;
@@ -228,7 +227,6 @@ export default function ReportsPage() {
                                                         <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">#</th>
                                                         <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Part</th>
                                                         <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Job Type</th>
-                                                        <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Expected</th>
                                                         <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Photo</th>
                                                         <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Verdict</th>
                                                         <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-neutral-400">Action</th>
@@ -240,7 +238,6 @@ export default function ReportsPage() {
                                                             <td className="px-4 py-3 text-sm text-gray-500 dark:text-neutral-400">{i + 1}</td>
                                                             <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white">{part.part_name}</td>
                                                             <td className="px-4 py-3 text-sm text-gray-600 dark:text-neutral-300 capitalize">{part.job_type}</td>
-                                                            <td className="px-4 py-3 text-sm text-gray-600 dark:text-neutral-300">{part.expected_count || "—"}</td>
                                                             <td className="px-4 py-3">
                                                                 {part.captured_image ? (
                                                                     <span className="inline-block px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase rounded-full">✓ Captured</span>

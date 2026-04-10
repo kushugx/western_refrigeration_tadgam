@@ -2,6 +2,7 @@ import os
 from ultralytics import YOLO
 import cv2
 import uuid
+from .fridge_config import ALL_PARTS
 
 # ─────────────────────────────────────────────
 # Model loading priority:
@@ -28,21 +29,13 @@ print(f"[ML Pipeline] Using model: {DEFAULT_MODEL_PATH}")
 # ─────────────────────────────────────────────
 # Known parts registry
 #
+# Built from the 27-part universal catalog in fridge_config.
 # Keys  : lowercase display names used throughout the app
 # Values: canonical display names shown to the user
-#
-# The misaligned knob is NOT listed here as a "part" — it is an
-# internal model class used only for alignment evaluation.
 # ─────────────────────────────────────────────
-KNOWN_PARTS = {
-    "dew collector":    "Dew Collector",
-    "tray":             "Tray",
-    "temperature knob": "Temperature Knob",
-    "shelf":            "Shelf",
+KNOWN_PARTS: dict[str, str] = {
+    part.strip().lower(): part for part in ALL_PARTS
 }
-
-# The model class name that indicates a misaligned temperature knob
-MISALIGNED_CLASS = "temperature-knob-misalligned"
 
 
 def _normalize(s: str) -> str:
@@ -89,8 +82,7 @@ class YOLOInspectionModel:
     def analyze(
         self,
         image_path: str,
-        job_type: str,
-        expected_count: int = None,
+        job_type: str = "presence",
         part_name: str = None,
     ) -> dict:
         """
@@ -99,8 +91,7 @@ class YOLOInspectionModel:
         Parameters
         ----------
         image_path    : Absolute path to the captured image.
-        job_type      : One of 'presence', 'absence', 'counting', 'alignment'.
-        expected_count: Required only for the 'counting' job.
+        job_type      : Only 'presence' is supported (presence/absence check).
         part_name     : The part being inspected (e.g. 'Dew Collector').
                         When provided, detection is filtered to that class only.
         """
@@ -132,79 +123,9 @@ class YOLOInspectionModel:
         # Resolve canonical part name
         display_name = _canonical_part(part_name)
         label        = display_name or "Object"
-        job_lower    = job_type.lower()
 
         # ─────────────────────────────────────────────
-        # ALIGNMENT  (Temperature Knob only)
-        #   The model has two dedicated classes:
-        #     • temperature-knob             → knob is correctly aligned
-        #     • temperature-knob-misalligned → knob is misaligned
-        #
-        #   Logic:
-        #     - Misaligned class detected   → FAIL
-        #     - Normal class detected only  → PASS
-        #     - Neither class detected      → FAIL (can't evaluate)
-        # ─────────────────────────────────────────────
-        if "align" in job_lower:
-            # ── Confidence-based alignment decision ──────────────────────────
-            # Both "temperature-knob" and "temperature-knob-misalligned" may be
-            # detected simultaneously.  We compare their PEAK confidence scores:
-            # whichever class scored higher is treated as the true detection.
-            #
-            # Example from debug log:
-            #   temperature-knob            0.807  ← winner → PASS
-            #   temperature-knob-misalligned 0.597
-            # ────────────────────────────────────────────────────────────────
-            if result.boxes is not None and len(result.boxes) > 0:
-                confs  = result.boxes.conf.tolist()
-                names  = [result.names[int(c)] for c in result.boxes.cls.tolist()]
-
-                # Gather max confidence per relevant class
-                max_aligned     = max(
-                    (conf for name, conf in zip(names, confs)
-                     if _normalize(name) == _normalize("temperature-knob")),
-                    default=0.0
-                )
-                max_misaligned  = max(
-                    (conf for name, conf in zip(names, confs)
-                     if _normalize(name) == _normalize(MISALIGNED_CLASS)),
-                    default=0.0
-                )
-
-                print(f"[ALIGN] aligned_conf={max_aligned:.3f} | misaligned_conf={max_misaligned:.3f}")
-
-                if max_aligned == 0.0 and max_misaligned == 0.0:
-                    # Neither class at production threshold
-                    return {
-                        "success": False,
-                        "detected_count": 0,
-                        "annotated_url": annotated_url,
-                        "message": "Job Failed: Temperature Knob not detected — cannot evaluate alignment.",
-                    }
-                elif max_aligned >= max_misaligned:
-                    return {
-                        "success": True,
-                        "detected_count": 1,
-                        "annotated_url": annotated_url,
-                        "message": f"Temperature Knob — Properly Aligned. (confidence: {max_aligned:.0%})",
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "detected_count": 1,
-                        "annotated_url": annotated_url,
-                        "message": f"Temperature Knob — Misaligned. Adjustment required. (confidence: {max_misaligned:.0%})",
-                    }
-            else:
-                return {
-                    "success": False,
-                    "detected_count": 0,
-                    "annotated_url": annotated_url,
-                    "message": "Job Failed: Temperature Knob not detected — cannot evaluate alignment.",
-                }
-
-        # ─────────────────────────────────────────────
-        # All other jobs — filter detections to the target part class
+        # Filter detections to the target part class
         # ─────────────────────────────────────────────
         if display_name:
             target_norm    = _normalize(display_name)
@@ -214,44 +135,15 @@ class YOLOInspectionModel:
             # No specific part → count every detection (backward-compatible)
             filtered_count = len(all_class_names)
 
-        job_success = False
-        message     = ""
-
-        if "counting" in job_lower:
-            if expected_count is None:
-                message = "Counting job failed: Missing expected_count parameter."
-            else:
-                job_success = (filtered_count == expected_count)
-                message = (
-                    f"{label} count verified: {filtered_count} found (Target: {expected_count})."
-                    if job_success
-                    else f"{label} count mismatch: {filtered_count} found, expected {expected_count}."
-                )
-
-        elif "absence" in job_lower:
-            job_success = (filtered_count == 0)
-            message = (
-                f"{label} - Absent (as expected)."
-                if job_success
-                else f"Job Failed: {label} is present but should be absent."
-            )
-
-        elif "presence" in job_lower:
-            job_success = (filtered_count > 0)
-            message = (
-                f"{label} - Present."
-                if job_success
-                else f"Job Failed: {label} not detected in the image."
-            )
-
-        else:
-            # Unknown job type — generic detection check
-            job_success = (filtered_count > 0)
-            message = (
-                f"{label} detected."
-                if job_success
-                else f"Job Failed: {label} not detected."
-            )
+        # ─────────────────────────────────────────────
+        # Presence / Absence check (only job type now)
+        # ─────────────────────────────────────────────
+        job_success = (filtered_count > 0)
+        message = (
+            f"{label} — Present."
+            if job_success
+            else f"Job Failed: {label} not detected in the image."
+        )
 
         return {
             "success": job_success,

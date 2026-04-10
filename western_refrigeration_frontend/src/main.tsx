@@ -15,12 +15,14 @@ import ReportsPage from "./pages/ReportsPage";
 import DataManagementPage from "./pages/DataManagementPage";
 import GalleryPage from "./pages/GalleryPage";
 import { showToast } from "./components/Toast";
+import { ALL_PARTS, FRIDGE_MODELS } from "./fridgeConfig";
 
 function CameraWidget() {
   const [status, setStatus] = useState({
     cameraConnected: false,
     mediaSyncActive: false,
-    batteryPercentage: null as number | null
+    batteryPercentage: null as number | null,
+    connectionType: 'wifi' as 'wifi' | 'wired'
   });
 
   useEffect(() => {
@@ -42,7 +44,8 @@ function CameraWidget() {
         setStatus({
           cameraConnected: data.ble_connected || wifiData.connected,
           mediaSyncActive: data.media_sync_active,
-          batteryPercentage: batteryData.connected ? batteryData.percentage : null
+          batteryPercentage: batteryData.connected ? batteryData.percentage : null,
+          connectionType: wifiData.connection_type || 'wifi'
         });
       } catch (err) {
         console.error("Failed to fetch camera widget status", err);
@@ -88,7 +91,13 @@ function CameraWidget() {
           title="Connect Camera (BLE)"
         >
           <span className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Camera</span>
-          <div className={`w-3 h-3 rounded-full ${status.cameraConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+          <div className={`w-3 h-3 rounded-full ${
+            status.cameraConnected 
+              ? (status.connectionType === 'wired' 
+                  ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' 
+                  : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]')
+              : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+          }`} />
         </div>
         <div className="w-px bg-gray-200 dark:bg-neutral-700" />
 
@@ -129,67 +138,18 @@ function CameraWidget() {
   );
 }
 
-function MasterForm({
-  masterName,
-  setMasterName,
-  selectedParts,
-  togglePart,
-  availableParts,
-}: {
-  masterName: string;
-  setMasterName: (v: string) => void;
-  selectedParts: string[];
-  togglePart: (p: string) => void;
-  availableParts: string[];
-}) {
-  return (
-    <>
-      {/* Master Name */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
-          Master Name
-        </label>
-        <input
-          type="text"
-          value={masterName}
-          onChange={(e) => setMasterName(e.target.value)}
-          className="w-full border border-gray-300 dark:border-neutral-600 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100 transition-shadow"
-          placeholder="Enter master name"
-        />
-      </div>
-
-      {/* Checkbox Parts */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
-          Select Parts
-        </label>
-        <div className="space-y-2 border border-gray-300 dark:border-neutral-600 rounded-lg p-3">
-          {availableParts.map((part) => (
-            <label key={part} className="flex items-center space-x-2 cursor-pointer text-gray-900 dark:text-neutral-100">
-              <input
-                type="checkbox"
-                checked={selectedParts.includes(part)}
-                onChange={() => togglePart(part)}
-                className="accent-western-green"
-              />
-              <span>{part}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
-
 
 function Dashboard() {
   const [createMasterOpen, setCreateMasterOpen] = useState(false);
   const [masterStep, setMasterStep] = useState(1);
-  const [masterName, setMasterName] = useState("");
-  const [selectedParts, setSelectedParts] = useState<string[]>([]);
-  const [partJobs, setPartJobs] = useState<Record<string, { jobType: string; count?: number }>>({});
 
-  const availableParts = ["Dew Collector", "Shelf", "Tray", "Temperature Knob"];
+  // Step 1: Model selection
+  const [modelFamily, setModelFamily] = useState("");
+  const [subModel, setSubModel] = useState("");
+  const [doorCount, setDoorCount] = useState(2);
+
+  // Step 2: Part selection
+  const [selectedParts, setSelectedParts] = useState<string[]>([...ALL_PARTS]); // all selected by default
 
   const togglePart = (part: string) => {
     setSelectedParts(prev =>
@@ -198,6 +158,9 @@ function Dashboard() {
         : [...prev, part]
     );
   };
+
+  const selectAllParts = () => setSelectedParts([...ALL_PARTS]);
+  const clearAllParts = () => setSelectedParts([]);
 
   const navigate = useNavigate();
 
@@ -239,6 +202,53 @@ function Dashboard() {
     const id = setInterval(poll, 5000);
     return () => clearInterval(id);
   }, []);
+
+  const resetWizard = () => {
+    setCreateMasterOpen(false);
+    setMasterStep(1);
+    setModelFamily("");
+    setSubModel("");
+    setDoorCount(2);
+    setSelectedParts([...ALL_PARTS]);
+  };
+
+  const handleCreateMaster = async () => {
+    try {
+      const masterName = `${subModel || modelFamily}`;
+      const payload = {
+        name: masterName,
+        model_family: modelFamily,
+        sub_model: subModel || modelFamily,
+        door_count: doorCount,
+        parts: selectedParts.map((part) => ({
+          part_name: part,
+          job_type: "presence",
+        })),
+      };
+
+      const response = await fetch("/masters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        showToast(errorData.detail || "Error creating master", "error");
+        return;
+      }
+
+      showToast("Master created successfully!", "success");
+      resetWizard();
+      // Refresh stats
+      fetch("/masters").then(r => r.json()).then(data => {
+        setStats(s => ({ ...s, totalMasters: data.length }));
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("Backend connection failed", "error");
+    }
+  };
 
   return (
     <>
@@ -330,7 +340,7 @@ function Dashboard() {
                 <svg className="w-7 h-7 text-gray-600 dark:text-neutral-300 group-hover:text-white dark:group-hover:text-gray-900 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
               </div>
               <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-1">Create Master</h3>
-              <p className="text-sm text-gray-500 dark:text-neutral-400">Define a new master file with parts and inspection criteria</p>
+              <p className="text-sm text-gray-500 dark:text-neutral-400">Define a new master file for a refrigerator model</p>
             </div>
           )}
 
@@ -430,89 +440,147 @@ function Dashboard() {
           <img src="/ugx-logo.jpg" alt="UGX.AI" className="h-6 object-contain opacity-70 hover:opacity-100 transition-opacity mix-blend-multiply dark:mix-blend-normal dark:invert" />
         </div>
       </div>
+
+      {/* ─── CREATE MASTER MODAL (3-Step Wizard) ─── */}
       {createMasterOpen && createPortal(
         <div className="fixed top-0 left-0 w-screen h-screen flex items-center justify-center bg-black/50 z-[100] p-4">
-          <div className="bg-white dark:bg-neutral-900 w-[600px] max-h-[90dvh] overflow-y-auto rounded-2xl shadow-2xl p-8 relative border border-gray-100 dark:border-neutral-800 flex flex-col gap-6">
+          <div className="bg-white dark:bg-neutral-900 w-[640px] max-h-[90dvh] overflow-y-auto rounded-2xl shadow-2xl p-8 relative border border-gray-100 dark:border-neutral-800 flex flex-col gap-6">
 
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white shrink-0">
-              Create Master
-            </h2>
+            {/* Step indicator */}
+            <div className="flex items-center justify-between shrink-0">
+              <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Create Master</h2>
+              <div className="flex items-center gap-2">
+                {[1, 2, 3].map(s => (
+                  <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                    s < masterStep ? "bg-western-green text-white" :
+                    s === masterStep ? "bg-western-green/20 text-western-green border-2 border-western-green" :
+                    "bg-gray-100 dark:bg-neutral-700 text-gray-400"
+                  }`}>
+                    {s < masterStep ? "✓" : s}
+                  </div>
+                ))}
+              </div>
+            </div>
 
+            {/* ─── STEP 1: Model Selection ─── */}
             {masterStep === 1 && (
               <>
-                <MasterForm
-                  masterName={masterName}
-                  setMasterName={setMasterName}
-                  selectedParts={selectedParts}
-                  togglePart={togglePart}
-                  availableParts={availableParts}
-                />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
+                      Model Family *
+                    </label>
+                    <select
+                      value={modelFamily}
+                      onChange={(e) => {
+                        setModelFamily(e.target.value);
+                        if (!subModel) setSubModel(e.target.value);
+                      }}
+                      className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-3 bg-gray-50 dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow appearance-none"
+                    >
+                      <option value="">-- Select Model Family --</option>
+                      {FRIDGE_MODELS.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
+                      Sub-Model / SKU Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={subModel}
+                      onChange={(e) => setSubModel(e.target.value)}
+                      placeholder="e.g. FTWH70, FTWH120, etc."
+                      className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-3 bg-gray-50 dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow"
+                    />
+                    <p className="text-xs text-gray-400 dark:text-neutral-500">Free-text entry — this will be scanned from QR code in future</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
+                      Number of Doors
+                    </label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4].map(n => (
+                        <button
+                          key={n}
+                          onClick={() => setDoorCount(n)}
+                          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                            doorCount === n
+                              ? "bg-western-green text-white border-western-green shadow-sm"
+                              : "bg-gray-50 dark:bg-neutral-800 text-gray-600 dark:text-neutral-300 border-gray-200 dark:border-neutral-600 hover:border-western-green/50"
+                          }`}
+                        >
+                          {n} Door{n > 1 ? "s" : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex justify-end space-x-4 pt-4">
                   <button
-                    onClick={() => {
-                      setCreateMasterOpen(false);
-                      setMasterStep(1);
-                      setMasterName("");
-                      setSelectedParts([]);
-                      setPartJobs({});
-                    }}
+                    onClick={resetWizard}
                     className="px-4 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-neutral-100"
                   >
                     Cancel
                   </button>
-
                   <button
                     onClick={() => setMasterStep(2)}
-                    disabled={!masterName || selectedParts.length === 0}
+                    disabled={!modelFamily || !subModel}
                     className="px-6 py-3 font-medium rounded-xl bg-western-green text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                   >
-                    Next
+                    Next →
                   </button>
                 </div>
               </>
             )}
 
+            {/* ─── STEP 2: Part Selection ─── */}
             {masterStep === 2 && (
-              <div className="flex flex-col gap-6 min-h-0">
-                <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-                  {selectedParts.map((part) => (
-                    <div key={part} className="border border-gray-200 dark:border-neutral-600 rounded-lg p-4 space-y-3 shrink-0">
-                      <h3 className="font-bold text-gray-800 dark:text-neutral-200 text-lg">{part}</h3>
+              <div className="flex flex-col gap-4 min-h-0">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-600 dark:text-neutral-400">
+                    {selectedParts.length} of {ALL_PARTS.length} parts selected
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={selectAllParts}
+                      className="text-xs font-semibold text-western-green hover:underline"
+                    >
+                      Select All
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      onClick={clearAllParts}
+                      className="text-xs font-semibold text-red-500 hover:underline"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
 
-                      <select
-                        className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2.5 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow appearance-none"
-                        value={partJobs[part]?.jobType || ""}
-                        onChange={(e) =>
-                          setPartJobs(prev => ({
-                            ...prev,
-                            [part]: { ...prev[part], jobType: e.target.value }
-                          }))
-                        }
-                      >
-                        <option value="">Select Job Type</option>
-                        <option value="presence">Presence / Absence</option>
-                        <option value="counting">Counting</option>
-                        <option value="alignment">Alignment</option>
-                      </select>
-
-                      {partJobs[part]?.jobType === "counting" && (
-                        <input
-                          type="number"
-                          min="1"
-                          placeholder="Enter expected count"
-                          className="w-full md:w-1/2 border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2.5 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow"
-                          onChange={(e) =>
-                            setPartJobs(prev => ({
-                              ...prev,
-                              [part]: {
-                                ...prev[part],
-                                count: Number(e.target.value)
-                              }
-                            }))
-                          }
-                        />
-                      )}
-                    </div>
+                <div className="grid grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                  {ALL_PARTS.map((part) => (
+                    <label
+                      key={part}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+                        selectedParts.includes(part)
+                          ? "bg-western-green/5 border-western-green/30 dark:bg-western-green/10"
+                          : "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedParts.includes(part)}
+                        onChange={() => togglePart(part)}
+                        className="accent-western-green w-4 h-4"
+                      />
+                      <span className="text-sm font-medium text-gray-800 dark:text-neutral-200">{part}</span>
+                    </label>
                   ))}
                 </div>
 
@@ -521,53 +589,74 @@ function Dashboard() {
                     onClick={() => setMasterStep(1)}
                     className="px-4 py-2 font-medium text-gray-600 dark:text-neutral-400 hover:text-gray-900 dark:hover:text-white transition-colors"
                   >
-                    Back
+                    ← Back
                   </button>
-
                   <button
-                    onClick={async () => {
-                      try {
-                        const payload = {
-                          name: masterName,
-                          parts: selectedParts.map((part) => ({
-                            part_name: part,
-                            job_type: partJobs[part]?.jobType,
-                            expected_count:
-                              partJobs[part]?.jobType === "counting"
-                                ? partJobs[part]?.count
-                                : null,
-                          })),
-                        };
-
-                        const response = await fetch("/masters", {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify(payload),
-                        });
-
-                        if (!response.ok) {
-                          const errorData = await response.json();
-                          showToast(errorData.detail || "Error creating master", "error");
-                          return;
-                        }
-
-                        showToast("Master created successfully!", "success");
-
-                        setCreateMasterOpen(false);
-                        setMasterStep(1);
-                        setMasterName("");
-                        setSelectedParts([]);
-                        setPartJobs({});
-                      } catch (error) {
-                        console.error(error);
-                        showToast("Backend connection failed", "error");
-                      }
-                    }}
-                    className="px-4 py-2 rounded-lg bg-western-green text-white hover:bg-emerald-800 transition-colors font-medium"
+                    onClick={() => setMasterStep(3)}
+                    disabled={selectedParts.length === 0}
+                    className="px-6 py-3 font-medium rounded-xl bg-western-green text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                   >
-                    Create Master
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ─── STEP 3: Review & Confirm ─── */}
+            {masterStep === 3 && (
+              <div className="flex flex-col gap-4 min-h-0">
+                <div className="bg-gray-50 dark:bg-neutral-800 rounded-xl p-5 space-y-3">
+                  <h3 className="font-semibold text-gray-800 dark:text-white text-lg">Summary</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-500 dark:text-neutral-400">Model Family</span>
+                      <p className="font-semibold text-gray-800 dark:text-white">{modelFamily}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-neutral-400">Sub-Model</span>
+                      <p className="font-semibold text-gray-800 dark:text-white">{subModel}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-neutral-400">Doors</span>
+                      <p className="font-semibold text-gray-800 dark:text-white">{doorCount}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-neutral-400">Parts</span>
+                      <p className="font-semibold text-gray-800 dark:text-white">{selectedParts.length}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-neutral-400">Job Type</span>
+                      <p className="font-semibold text-gray-800 dark:text-white">Presence / Absence</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
+                  <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-neutral-500 mb-2">Parts to Inspect</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedParts.map((part) => (
+                      <span
+                        key={part}
+                        className="px-3 py-1.5 bg-western-green/10 text-western-green text-xs font-semibold rounded-lg border border-western-green/20"
+                      >
+                        {part}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-4 border-t border-gray-100 dark:border-neutral-800 shrink-0">
+                  <button
+                    onClick={() => setMasterStep(2)}
+                    className="px-4 py-2 font-medium text-gray-600 dark:text-neutral-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    onClick={handleCreateMaster}
+                    className="px-6 py-3 rounded-xl bg-western-green text-white hover:bg-emerald-800 transition-colors font-medium shadow-sm"
+                  >
+                    Create Master ✓
                   </button>
                 </div>
               </div>

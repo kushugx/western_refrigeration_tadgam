@@ -8,6 +8,9 @@ class Master(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    model_family = Column(String, nullable=False)   # e.g. "FTWH"
+    sub_model = Column(String, nullable=False)       # e.g. "FTWH70" (free-text)
+    door_count = Column(Integer, nullable=False, default=2)
 
     parts = relationship("MasterPart", back_populates="master", cascade="all, delete")
 
@@ -18,8 +21,7 @@ class MasterPart(Base):
     id = Column(Integer, primary_key=True, index=True)
     master_id = Column(Integer, ForeignKey("masters.id"))
     part_name = Column(String, nullable=False)
-    job_type = Column(String, nullable=False)
-    expected_count = Column(Integer, nullable=True)
+    job_type = Column(String, nullable=False, default="presence")  # only "presence" now
     image_url = Column(String, nullable=True)
 
     master = relationship("Master", back_populates="parts")

@@ -6,13 +6,15 @@ interface MasterPart {
   id: number;
   part_name: string;
   job_type: string;
-  expected_count?: number | null;
   image_url?: string | null;
 }
 
 interface Master {
   id: number;
   name: string;
+  model_family?: string;
+  sub_model?: string;
+  door_count?: number;
   parts: MasterPart[];
 }
 
@@ -43,9 +45,8 @@ export default function InspectionPage() {
       try {
         const payload = {
           image_url: capturedImage.split('?')[0], // strip timestamp
-          job_type: master?.parts[currentIndex].job_type || 'presence',
-          expected_count: master?.parts[currentIndex].expected_count,
-          part_name: master?.parts[currentIndex].part_name  // enables part-specific detection filtering
+          job_type: "presence",
+          part_name: master?.parts[currentIndex].part_name
         };
 
         const res = await fetch("/api/analyze", {
@@ -125,8 +126,7 @@ export default function InspectionPage() {
 
     const partsData = master.parts.map((part, idx) => ({
       part_name: part.part_name,
-      job_type: part.job_type,
-      expected_count: part.expected_count || null,
+      job_type: "presence",
       captured_image: allCaptures[idx] || null,
       reference_image: part.image_url || null,
       ml_status: allMlResults[idx]?.status || 'idle',
@@ -174,6 +174,19 @@ export default function InspectionPage() {
     showToast(`Verdict overridden to ${newStatus.toUpperCase()}`, "info");
   };
 
+  const handleRemoteCapture = async () => {
+    try {
+      showToast("Triggering camera...", "info");
+      const res = await fetch("/gopro/capture", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.detail || "Failed to trigger capture", "error");
+      }
+    } catch (e) {
+      showToast("Failed to connect to backend", "error");
+    }
+  };
+
   const handleNext = () => {
     // Save capture for current part
     if (capturedImage) {
@@ -213,8 +226,7 @@ export default function InspectionPage() {
 
     const partsData = master.parts.map((part, idx) => ({
       part_name: part.part_name,
-      job_type: part.job_type,
-      expected_count: part.expected_count || null,
+      job_type: "presence",
       captured_image: allCaptures[idx] || null,
       reference_image: part.image_url || null,
       ml_status: allMlResults[idx]?.status || 'idle',
@@ -272,8 +284,11 @@ export default function InspectionPage() {
 
   return (
     <div className="flex-1 flex flex-col">
-      {/* Top Info Bar (Simplified) */}
-      <div className="flex justify-end p-4 bg-white dark:bg-neutral-900 shadow-sm border-b border-gray-100 dark:border-neutral-800">
+      {/* Top Info Bar */}
+      <div className="flex justify-between items-center p-4 bg-white dark:bg-neutral-900 shadow-sm border-b border-gray-100 dark:border-neutral-800">
+        <span className="text-sm font-medium text-gray-500 dark:text-neutral-400">
+          {master.sub_model || master.model_family || master.name}
+        </span>
         <span className="text-sm font-semibold text-gray-500 bg-gray-100 px-3 py-1 rounded-full dark:bg-neutral-800 dark:text-neutral-400">
           Part {currentIndex + 1} of {master.parts.length}
         </span>
@@ -282,10 +297,7 @@ export default function InspectionPage() {
       {/* Current Part Details Header */}
       <div className="bg-white dark:bg-neutral-900 py-3 shadow-sm text-center border-b border-gray-100 dark:border-neutral-800 z-10">
         <h2 className="text-xl font-bold text-gray-800 dark:text-white">
-          {currentPart.part_name} <span className="text-gray-400 font-normal ml-2">| {currentPart.job_type}</span>
-          {currentPart.job_type === "counting" && currentPart.expected_count
-            ? <span className="text-western-green dark:text-emerald-400 ml-2">(Target: {currentPart.expected_count})</span>
-            : ""}
+          {currentPart.part_name} <span className="text-gray-400 font-normal ml-2">| Presence / Absence</span>
         </h2>
       </div>
 
@@ -425,20 +437,38 @@ export default function InspectionPage() {
         ) : (
           <>
             {currentIndex < master.parts.length - 1 ? (
-              <button
-                onClick={handleNext}
-                className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm"
-              >
-                Skip Part ⏭
-              </button>
+              <div className="flex gap-4">
+                <button
+                  onClick={handleRemoteCapture}
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium shadow-sm flex items-center justify-center"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                  Capture Photo
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm"
+                >
+                  Skip Part →
+                </button>
+              </div>
             ) : (
-              <button
-                onClick={handleSkipLastAndGenerate}
-                disabled={generatingReport}
-                className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm disabled:opacity-50"
-              >
-                {generatingReport ? "Generating..." : "Skip & Finish 🏁"}
-              </button>
+              <div className="flex gap-4">
+                <button
+                  onClick={handleRemoteCapture}
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium shadow-sm flex items-center justify-center"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                  Capture Photo
+                </button>
+                <button
+                  onClick={handleSkipLastAndGenerate}
+                  disabled={generatingReport}
+                  className="px-8 py-3 bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors font-medium shadow-sm disabled:opacity-50"
+                >
+                  {generatingReport ? "Generating..." : "Skip & Finish 🏁"}
+                </button>
+              </div>
             )}
           </>
         )}

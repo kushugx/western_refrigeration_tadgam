@@ -9,6 +9,7 @@ from .gopro_manager import router as gopro_router
 from .auth import router as auth_router, seed_default_users
 from .ml_pipeline import get_ml_model
 from . import archive_manager
+from .fridge_config import ALL_PARTS, FRIDGE_MODELS, JOB_TYPES
 from pydantic import BaseModel
 import os
 import uuid
@@ -49,6 +50,10 @@ _seed_db.close()
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Create base_images sub-directory for reference images
+BASE_IMAGES_DIR = os.path.join(UPLOAD_DIR, "base_images")
+os.makedirs(BASE_IMAGES_DIR, exist_ok=True)
+
 # Create captures directory for GoPro synced photos
 CAPTURES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "captures")
 os.makedirs(CAPTURES_DIR, exist_ok=True)
@@ -72,10 +77,23 @@ def root():
     return {"message": "Western Refrigeration Backend Running"}
 
 
+# ─── Fridge Configuration Endpoint ──────────────────────────
+
+@app.get("/api/fridge-config")
+def get_fridge_config():
+    """Returns the fridge model/parts configuration to the frontend."""
+    return {
+        "parts": ALL_PARTS,
+        "models": FRIDGE_MODELS,
+        "job_types": JOB_TYPES,
+    }
+
+
+# ─── ML Analysis ───────────────────────────────────────────
+
 class AnalyzeRequest(BaseModel):
     image_url: str
-    job_type: str
-    expected_count: int | None = None
+    job_type: str = "presence"
     part_name: str | None = None  # Optional: when provided, filters detections to this specific part
 
 @app.post("/api/analyze")
@@ -104,7 +122,6 @@ def analyze_image(request: AnalyzeRequest):
     result = ml_model.analyze(
         image_path=file_path,
         job_type=request.job_type,
-        expected_count=request.expected_count,
         part_name=request.part_name
     )
     
@@ -134,18 +151,22 @@ def upload_image(file: UploadFile = File()):
     return {"image_url": image_url}
 
 
-# Default images for known part types (case-insensitive lookup)
-DEFAULT_PART_IMAGES = {
-    "dew collector": "/uploads/dew_collector.png",
-    "shelf": "/uploads/shelf.png",
-    "tray": "/uploads/tray.png",
-    "temperature knob": "/uploads/temperature_knob.png",
-}
+# ─── Base Image Resolution ─────────────────────────────────
+
+def get_base_image(part_name: str) -> str | None:
+    """
+    Look up a default reference image for a part in uploads/base_images/.
+    E.g. part_name="Dew Collector" → uploads/base_images/dew_collector.png
+    """
+    slug = part_name.strip().lower().replace(" ", "_").replace("/", "_")
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        candidate = os.path.join(BASE_IMAGES_DIR, f"{slug}{ext}")
+        if os.path.exists(candidate):
+            return f"/uploads/base_images/{slug}{ext}"
+    return None
 
 
-def get_default_image(part_name: str) -> str | None:
-    """Return the default image URL for a known part name, or None."""
-    return DEFAULT_PART_IMAGES.get(part_name.strip().lower())
+# ─── Captures ──────────────────────────────────────────────
 
 @app.get("/api/captures")
 def list_captures():
@@ -207,39 +228,38 @@ def delete_captures(request: DeleteCapturesRequest):
     }
 
 
+# ─── Masters ──────────────────────────────────────────────
+
 @app.post("/masters")
 def create_master(master: schemas.MasterCreate, db: Session = Depends(get_db)):
     if not master.parts:
         raise HTTPException(status_code=400, detail="At least one part is required")
 
     # Create Master
-    db_master = models.Master(name=master.name)
+    db_master = models.Master(
+        name=master.name,
+        model_family=master.model_family,
+        sub_model=master.sub_model,
+        door_count=master.door_count,
+    )
     db.add(db_master)
     db.flush()  # Get master ID before commit
 
     # Create Parts
     for part in master.parts:
-        if part.job_type == "counting" and not part.expected_count:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Expected count required for part {part.part_name}"
-            )
-
-        # Auto-assign default image if none provided
-        image_url = part.image_url or get_default_image(part.part_name)
+        # Auto-assign default base image if none provided
+        image_url = part.image_url or get_base_image(part.part_name)
 
         db_part = models.MasterPart(
             master_id=db_master.id,
             part_name=part.part_name,
             job_type=part.job_type,
-            expected_count=part.expected_count,
             image_url=image_url
         )
         db.add(db_part)
 
     db.commit()
     db.refresh(db_master)
-
 
     return {"message": "Master created successfully", "master_id": db_master.id}
 
@@ -251,7 +271,10 @@ def get_masters(db: Session = Depends(get_db)):
     for master in masters:
         result.append({
             "id": master.id,
-            "name": master.name
+            "name": master.name,
+            "model_family": master.model_family,
+            "sub_model": master.sub_model,
+            "door_count": master.door_count,
         })
 
     return result
@@ -268,12 +291,14 @@ def get_master_by_id(master_id: int, db: Session = Depends(get_db)):
     return {
         "id": master.id,
         "name": master.name,
+        "model_family": master.model_family,
+        "sub_model": master.sub_model,
+        "door_count": master.door_count,
         "parts": [
             {
                 "id": part.id,
                 "part_name": part.part_name,
                 "job_type": part.job_type,
-                "expected_count": part.expected_count,
                 "image_url": part.image_url
             }
             for part in master.parts
@@ -305,28 +330,24 @@ def update_master(master_id: int, master: schemas.MasterCreate, db: Session = De
     if not master.parts:
         raise HTTPException(status_code=400, detail="At least one part is required")
 
-    # Update master name
+    # Update master fields
     db_master.name = master.name
+    db_master.model_family = master.model_family
+    db_master.sub_model = master.sub_model
+    db_master.door_count = master.door_count
 
     # Delete existing parts
     db.query(models.MasterPart).filter(models.MasterPart.master_id == master_id).delete()
 
     # Add updated parts
     for part in master.parts:
-        if part.job_type == "counting" and not part.expected_count:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Expected count required for part {part.part_name}"
-            )
-
-        # Auto-assign default image if none provided
-        image_url = part.image_url or get_default_image(part.part_name)
+        # Auto-assign default base image if none provided
+        image_url = part.image_url or get_base_image(part.part_name)
 
         new_part = models.MasterPart(
             master_id=master_id,
             part_name=part.part_name,
             job_type=part.job_type,
-            expected_count=part.expected_count,
             image_url=image_url
         )
         db.add(new_part)
@@ -474,7 +495,7 @@ def download_report_pdf(report_id: int, db: Session = Depends(get_db)):
     elements.append(Paragraph("Inspection Summary", styles["Heading2"]))
     elements.append(Spacer(1, 8))
 
-    summary_data = [["#", "Part Name", "Job Type", "Expected", "Photo", "Decision"]]
+    summary_data = [["#", "Part Name", "Job Type", "Photo", "Decision"]]
     for i, part in enumerate(parts, 1):
         ml_status = part.get("ml_status", "idle")
         is_overridden = part.get("is_overridden", False)
@@ -493,13 +514,12 @@ def download_report_pdf(report_id: int, db: Session = Depends(get_db)):
         summary_data.append([
             str(i),
             part.get("part_name", ""),
-            part.get("job_type", ""),
-            str(part.get("expected_count", "-") or "-"),
+            part.get("job_type", "presence"),
             "Yes" if part.get("captured_image") else "No",
             status_text
         ])
 
-    summary_table = Table(summary_data, colWidths=[0.3 * inch, 1.8 * inch, 1.1 * inch, 0.8 * inch, 0.6 * inch, 0.8 * inch])
+    summary_table = Table(summary_data, colWidths=[0.3 * inch, 2.0 * inch, 1.3 * inch, 0.6 * inch, 0.8 * inch])
     summary_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -545,7 +565,7 @@ def download_report_pdf(report_id: int, db: Session = Depends(get_db)):
     elements.append(Spacer(1, 8))
 
     for i, part in enumerate(parts, 1):
-        elements.append(Paragraph(f"Part {i}: {part.get('part_name', '')} — {part.get('job_type', '')}", styles["Heading3"]))
+        elements.append(Paragraph(f"Part {i}: {part.get('part_name', '')} — {part.get('job_type', 'presence')}", styles["Heading3"]))
         elements.append(Spacer(1, 4))
 
         ml_msg = part.get("ml_message", "")

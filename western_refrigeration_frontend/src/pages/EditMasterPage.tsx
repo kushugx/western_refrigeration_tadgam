@@ -5,17 +5,20 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { showToast } from "../components/Toast";
+import { ALL_PARTS, FRIDGE_MODELS } from "../fridgeConfig";
 
 interface PartJob {
   part_name: string;
   job_type: string;
-  expected_count?: number | null;
   image_url?: string | null;
 }
 
 interface Master {
   id: number;
   name: string;
+  model_family: string;
+  sub_model: string;
+  door_count: number;
   parts: PartJob[];
 }
 
@@ -25,7 +28,13 @@ export default function EditMasterPage() {
 
   const [loading, setLoading] = useState(true);
   const [masterName, setMasterName] = useState("");
+  const [modelFamily, setModelFamily] = useState("");
+  const [subModel, setSubModel] = useState("");
+  const [doorCount, setDoorCount] = useState(2);
   const [parts, setParts] = useState<PartJob[]>([]);
+
+  // For adding new parts
+  const [showAddPart, setShowAddPart] = useState(false);
 
   useEffect(() => {
     const fetchMaster = async () => {
@@ -39,6 +48,9 @@ export default function EditMasterPage() {
 
         const data: Master = await res.json();
         setMasterName(data.name);
+        setModelFamily(data.model_family);
+        setSubModel(data.sub_model);
+        setDoorCount(data.door_count);
         setParts(data.parts);
         setLoading(false);
       } catch (error) {
@@ -50,16 +62,6 @@ export default function EditMasterPage() {
 
     fetchMaster();
   }, [id, navigate]);
-
-  const handlePartChange = (
-    index: number,
-    field: keyof PartJob,
-    value: string | number | null
-  ) => {
-    const updated = [...parts];
-    updated[index] = { ...updated[index], [field]: value };
-    setParts(updated);
-  };
 
   const handleImageUpload = async (index: number, file: File) => {
     const formData = new FormData();
@@ -77,7 +79,9 @@ export default function EditMasterPage() {
       }
 
       const data = await res.json();
-      handlePartChange(index, "image_url", data.image_url);
+      const updated = [...parts];
+      updated[index] = { ...updated[index], image_url: data.image_url };
+      setParts(updated);
     } catch (error) {
       console.error(error);
       showToast("Image upload failed", "error");
@@ -93,6 +97,19 @@ export default function EditMasterPage() {
     setParts(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleAddPart = (partName: string) => {
+    // Don't add duplicates
+    if (parts.some(p => p.part_name === partName)) {
+      showToast(`"${partName}" is already in the list`, "error");
+      return;
+    }
+    setParts(prev => [...prev, { part_name: partName, job_type: "presence" }]);
+    setShowAddPart(false);
+  };
+
+  // Parts not yet in the master
+  const availableToAdd = ALL_PARTS.filter(p => !parts.some(pp => pp.part_name === p));
+
   // Enter key shortcut to save
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -104,12 +121,15 @@ export default function EditMasterPage() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [masterName, parts]);
+  }, [masterName, parts, modelFamily, subModel, doorCount]);
 
   const handleSave = async () => {
     try {
       const payload = {
         name: masterName,
+        model_family: modelFamily,
+        sub_model: subModel,
+        door_count: doorCount,
         parts,
       };
 
@@ -156,19 +176,93 @@ export default function EditMasterPage() {
       </div>
 
       <div className="max-w-3xl mx-auto bg-white dark:bg-neutral-800 rounded-xl shadow-xl p-8 space-y-6">
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">
-            Master Name
-          </label>
-          <input
-            type="text"
-            value={masterName}
-            onChange={(e) => setMasterName(e.target.value)}
-            className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow"
-          />
+
+        {/* Model Info (editable) */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Model Family</label>
+            <select
+              value={modelFamily}
+              onChange={(e) => setModelFamily(e.target.value)}
+              className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow appearance-none"
+            >
+              {FRIDGE_MODELS.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Sub-Model</label>
+            <input
+              type="text"
+              value={subModel}
+              onChange={(e) => setSubModel(e.target.value)}
+              className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow"
+            />
+          </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Master Name</label>
+            <input
+              type="text"
+              value={masterName}
+              onChange={(e) => setMasterName(e.target.value)}
+              className="w-full border border-gray-300 dark:border-neutral-600 rounded-xl px-4 py-2 bg-gray-50 dark:bg-neutral-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-western-green/50 focus:border-western-green transition-shadow"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-neutral-300">Door Count</label>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setDoorCount(n)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all border ${
+                    doorCount === n
+                      ? "bg-western-green text-white border-western-green"
+                      : "bg-gray-50 dark:bg-neutral-800 text-gray-600 dark:text-neutral-300 border-gray-200 dark:border-neutral-600"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Parts List */}
         <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-neutral-400">
+              Parts ({parts.length})
+            </h3>
+            <button
+              onClick={() => setShowAddPart(!showAddPart)}
+              className="text-sm font-medium text-western-green hover:underline"
+            >
+              + Add Part
+            </button>
+          </div>
+
+          {/* Add Part Dropdown */}
+          {showAddPart && availableToAdd.length > 0 && (
+            <div className="border border-western-green/20 rounded-xl p-3 bg-western-green/5 dark:bg-western-green/10 max-h-48 overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-2 gap-1.5">
+                {availableToAdd.map(part => (
+                  <button
+                    key={part}
+                    onClick={() => handleAddPart(part)}
+                    className="text-left text-sm px-3 py-2 rounded-lg hover:bg-western-green/10 dark:hover:bg-western-green/20 text-gray-700 dark:text-neutral-300 transition-colors"
+                  >
+                    + {part}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {parts.map((part, index) => (
             <div
               key={index}
@@ -178,13 +272,18 @@ export default function EditMasterPage() {
                 <h3 className="font-bold text-gray-800 dark:text-neutral-200 text-lg">
                   {part.part_name}
                 </h3>
-                <button
-                  onClick={() => handleDeletePart(index)}
-                  className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-sm font-medium px-3 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                  title="Delete this part"
-                >
-                  ✕ Remove
-                </button>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider px-3 py-1 bg-western-green/10 text-western-green rounded-full">
+                    Presence / Absence
+                  </span>
+                  <button
+                    onClick={() => handleDeletePart(index)}
+                    className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-sm font-medium px-3 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    title="Delete this part"
+                  >
+                    ✕ Remove
+                  </button>
+                </div>
               </div>
 
               {/* Part Image */}
@@ -215,34 +314,6 @@ export default function EditMasterPage() {
                   </label>
                 </div>
               </div>
-
-              <select
-                value={part.job_type}
-                onChange={(e) =>
-                  handlePartChange(index, "job_type", e.target.value)
-                }
-                className="w-full border border-gray-300 dark:border-neutral-600 rounded-lg p-2 bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100"
-              >
-                <option value="presence">Presence / Absence</option>
-                <option value="counting">Counting</option>
-                <option value="alignment">Alignment</option>
-              </select>
-
-              {part.job_type === "counting" && (
-                <input
-                  type="number"
-                  value={part.expected_count || ""}
-                  onChange={(e) =>
-                    handlePartChange(
-                      index,
-                      "expected_count",
-                      Number(e.target.value)
-                    )
-                  }
-                  className="w-full border border-gray-300 dark:border-neutral-600 rounded-lg p-2 bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100"
-                  placeholder="Expected Count"
-                />
-              )}
             </div>
           ))}
         </div>

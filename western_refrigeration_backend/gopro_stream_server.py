@@ -14,7 +14,65 @@ from contextlib import asynccontextmanager
 # GoPro Configuration
 # (Matches your working preview script)
 # ==============================
-GOPRO_IP = "10.5.5.9"
+import socket
+
+_GOPRO_IP_CACHE = None
+
+def get_gopro_ip() -> str:
+    """Dynamically determine whether GoPro is connected via WiFi or USB."""
+    global _GOPRO_IP_CACHE
+    if _GOPRO_IP_CACHE:
+        try:
+            with socket.create_connection((_GOPRO_IP_CACHE, 8080), timeout=1):
+                return _GOPRO_IP_CACHE
+        except Exception:
+            _GOPRO_IP_CACHE = None
+
+    try:
+        with socket.create_connection(("10.5.5.9", 8080), timeout=1):
+            _GOPRO_IP_CACHE = "10.5.5.9"
+            return _GOPRO_IP_CACHE
+    except Exception:
+        pass
+
+    try:
+        def _run_find():
+            import asyncio
+            from open_gopro.network.wifi import mdns_scanner
+            async def find_wired_ip():
+                try:
+                    resp = await mdns_scanner.find_first_ip_addr("_gopro-web._tcp.local.", timeout=2)
+                    serial = resp.name.split(".")[0]
+                    last_3 = serial[-3:]
+                    return f"172.2{last_3[0]}.1{last_3[1]}{last_3[2]}.51"
+                except Exception:
+                    return None
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(find_wired_ip())
+            finally:
+                loop.close()
+                
+        wired_ip = _run_find()
+        if wired_ip:
+            try:
+                with socket.create_connection((wired_ip, 8080), timeout=1):
+                    _GOPRO_IP_CACHE = wired_ip
+                    # Auto-unlock GoPro out of "USB Connected" mass storage mode
+                    try:
+                        import urllib.request
+                        req = urllib.request.Request(f"http://{wired_ip}:8080/gopro/camera/control/wired_usb?p=1")
+                        urllib.request.urlopen(req, timeout=1)
+                    except Exception:
+                        pass
+                    return _GOPRO_IP_CACHE
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return "10.5.5.9"
+
 UDP_PORT = 8554
 
 # Directory for captured photos
@@ -35,7 +93,7 @@ connection_status = "disconnected"
 
 def start_gopro_preview():
     """Start the GoPro preview stream via Open GoPro HTTP API (port 8080)."""
-    url = f"http://{GOPRO_IP}:8080/gopro/camera/stream/start?port={UDP_PORT}"
+    url = f"http://{get_gopro_ip()}:8080/gopro/camera/stream/start?port={UDP_PORT}"
     subprocess.run(
         ["curl", "-s", url],
         stdout=subprocess.DEVNULL,
@@ -47,7 +105,7 @@ def start_gopro_preview():
 
 def stop_gopro_preview():
     """Stop the GoPro preview stream."""
-    url = f"http://{GOPRO_IP}:8080/gopro/camera/stream/stop"
+    url = f"http://{get_gopro_ip()}:8080/gopro/camera/stream/stop"
     try:
         subprocess.run(
             ["curl", "-s", url],
@@ -76,7 +134,7 @@ def frame_reader():
     start_gopro_preview()
     time.sleep(1.0)
 
-    udp_url = f"udp://{GOPRO_IP}:{UDP_PORT}"
+    udp_url = f"udp://{get_gopro_ip()}:{UDP_PORT}"
     cap = cv2.VideoCapture(udp_url, cv2.CAP_FFMPEG)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 

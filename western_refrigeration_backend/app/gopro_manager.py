@@ -32,9 +32,68 @@ _BLE_SCRIPT = os.path.join(_BACKEND_DIR, "gopro_ble_connect.py")
 _STREAM_SCRIPT = os.path.join(_BACKEND_DIR, "gopro_stream_server.py")
 _CAPTURES_DIR = os.path.join(_BACKEND_DIR, "captures")
 
-GOPRO_IP = "10.5.5.9"
-
 os.makedirs(_CAPTURES_DIR, exist_ok=True)
+
+_GOPRO_IP_CACHE = None
+
+def get_gopro_ip() -> str:
+    """Dynamically determine whether GoPro is connected via WiFi or USB."""
+    global _GOPRO_IP_CACHE
+    if _GOPRO_IP_CACHE:
+        try:
+            with socket.create_connection((_GOPRO_IP_CACHE, 8080), timeout=1):
+                return _GOPRO_IP_CACHE
+        except Exception:
+            _GOPRO_IP_CACHE = None
+
+    # Try default Wireless connection first
+    try:
+        with socket.create_connection(("10.5.5.9", 8080), timeout=1):
+            _GOPRO_IP_CACHE = "10.5.5.9"
+            return _GOPRO_IP_CACHE
+    except Exception:
+        pass
+
+    # Try to discover Wired USB IP via mDNS
+    try:
+        def _run_find():
+            import asyncio
+            from open_gopro.network.wifi import mdns_scanner
+            async def find_wired_ip():
+                try:
+                    resp = await mdns_scanner.find_first_ip_addr("_gopro-web._tcp.local.", timeout=2)
+                    serial = resp.name.split(".")[0]
+                    last_3 = serial[-3:]
+                    return f"172.2{last_3[0]}.1{last_3[1]}{last_3[2]}.51"
+                except Exception:
+                    return None
+            
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(find_wired_ip())
+            finally:
+                loop.close()
+                
+        wired_ip = _run_find()
+        if wired_ip:
+            try:
+                with socket.create_connection((wired_ip, 8080), timeout=1):
+                    _GOPRO_IP_CACHE = wired_ip
+                    # Auto-unlock GoPro out of "USB Connected" mass storage mode
+                    try:
+                        import urllib.request
+                        req = urllib.request.Request(f"http://{wired_ip}:8080/gopro/camera/control/wired_usb?p=1")
+                        urllib.request.urlopen(req, timeout=1)
+                    except Exception:
+                        pass
+                    return _GOPRO_IP_CACHE
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Error discovering wired GoPro: {e}")
+
+    # Fallback to default wifi if no wired connection found
+    return "10.5.5.9"
 
 
 def _is_running(proc: subprocess.Popen | None) -> bool:
@@ -54,15 +113,19 @@ def gopro_status():
 
 @router.get("/wifi-status")
 def wifi_status():
-    """Check if laptop is connected to GoPro WiFi AP by trying to reach 10.5.5.9."""
+    """Check if laptop is connected to GoPro via WiFi or USB."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
-        result = sock.connect_ex((GOPRO_IP, 8080))
+        ip = get_gopro_ip()
+        result = sock.connect_ex((ip, 8080))
         sock.close()
-        return {"connected": result == 0}
+        return {
+            "connected": result == 0,
+            "connection_type": "wired" if "172." in ip else "wifi"
+        }
     except Exception:
-        return {"connected": False}
+        return {"connected": False, "connection_type": "wifi"}
 
 
 @router.get("/battery")
@@ -71,7 +134,7 @@ def battery_status():
     import json
     try:
         req = urllib.request.Request(
-            f"http://{GOPRO_IP}:8080/gopro/camera/state",
+            f"http://{get_gopro_ip()}:8080/gopro/camera/state",
             headers={"Accept": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=2) as resp:
@@ -89,7 +152,7 @@ def storage_status():
     import json
     try:
         req = urllib.request.Request(
-            f"http://{GOPRO_IP}:8080/gopro/camera/state",
+            f"http://{get_gopro_ip()}:8080/gopro/camera/state",
             headers={"Accept": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
@@ -125,7 +188,7 @@ def format_sd_card():
     import urllib.request
     import json
     try:
-        req = urllib.request.Request(f"http://{GOPRO_IP}:8080/gopro/media/list", headers={"Accept": "application/json"})
+        req = urllib.request.Request(f"http://{get_gopro_ip()}:8080/gopro/media/list", headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             
@@ -138,7 +201,7 @@ def format_sd_card():
                 if d_name and f_name:
                     try:
                         del_req = urllib.request.Request(
-                            f"http://{GOPRO_IP}:8080/gopro/media/delete/file?path={d_name}/{f_name}",
+                            f"http://{get_gopro_ip()}:8080/gopro/media/delete/file?path={d_name}/{f_name}",
                             headers={"Accept": "application/json"}
                         )
                         with urllib.request.urlopen(del_req, timeout=3) as del_resp:
@@ -268,7 +331,7 @@ def _get_gopro_media_keys() -> set:
     keys = set()
     try:
         req = urllib.request.Request(
-            f"http://{GOPRO_IP}:8080/gopro/media/list",
+            f"http://{get_gopro_ip()}:8080/gopro/media/list",
             headers={"Accept": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -304,7 +367,7 @@ def _media_sync_worker():
                     continue
 
                 dir_name, filename = file_key.split("/", 1)
-                photo_url = f"http://{GOPRO_IP}:8080/videos/DCIM/{dir_name}/{filename}"
+                photo_url = f"http://{get_gopro_ip()}:8080/videos/DCIM/{dir_name}/{filename}"
                 dest_path = os.path.join(_CAPTURES_DIR, f"gopro_{filename}")
 
                 try:
@@ -346,6 +409,23 @@ def start_media_sync():
     _media_sync_thread.start()
 
     return {"status": "started", "message": f"Media sync started. {len(_baseline_files)} existing files will be ignored."}
+
+
+@router.post("/capture")
+def capture_remote_photo():
+    """Trigger the hardware shutter remotely via the GoPro API."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"http://{get_gopro_ip()}:8080/gopro/camera/shutter/start",
+            headers={"Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.getcode() == 200:
+                return {"success": True, "message": "Shutter remotely triggered. Media sync will pick it up automatically."}
+            return {"success": False, "detail": "GoPro rejected the shutter command."}
+    except Exception as e:
+        return {"success": False, "detail": str(e)}
 
 
 @router.post("/stop-media-sync")
